@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import supabase from '../lib/supabase';
 import SafeIcon from '../common/SafeIcon';
-import { FiUser, FiUpload, FiTrash2, FiEdit2, FiPlus, FiSave, FiArrowRight, FiLoader, FiInfo, FiX, FiCheck } from 'react-icons/fi';
+import { FiUser, FiUpload, FiTrash2, FiEdit2, FiPlus, FiSave, FiArrowRight, FiLoader, FiInfo, FiX, FiCheck, FiAlertCircle, FiRefreshCw } from 'react-icons/fi';
 import { trackCircleUpdated } from '../lib/analytics';
 
 const CircleSetupScreen = () => {
@@ -13,6 +13,8 @@ const CircleSetupScreen = () => {
   const [user, setUser] = useState(null);
   const [people, setPeople] = useState([]);
   const [showInfoModal, setShowInfoModal] = useState(false);
+  const [error, setError] = useState(null);
+  const [dataFetched, setDataFetched] = useState(false);
 
   // Form state for adding/editing a person
   const [isEditing, setIsEditing] = useState(false);
@@ -40,10 +42,45 @@ const CircleSetupScreen = () => {
   useEffect(() => {
     const loadUserData = async () => {
       setLoading(true);
+      setError(null);
+      
       try {
-        const { data: { user: authUser } } = await supabase.auth.getUser();
+        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+        
+        if (authError) {
+          console.error('Error getting authenticated user:', authError);
+          throw authError;
+        }
+        
         if (authUser) {
           setUser(authUser);
+          
+          // Ensure user exists in users table
+          try {
+            const { data: userData, error: userError } = await supabase
+              .from('users')
+              .select('id')
+              .eq('id', authUser.id)
+              .single();
+              
+            // If user doesn't exist in users table, create them
+            if (userError && userError.code === 'PGRST116') {
+              await supabase
+                .from('users')
+                .insert([{ 
+                  id: authUser.id, 
+                  email: authUser.email
+                }]);
+              console.log('Created new user record for:', authUser.email);
+            } else if (userError) {
+              console.error('Error checking user:', userError);
+              // Continue anyway, we'll try to load relationships
+            }
+          } catch (userError) {
+            console.error('Error managing user record:', userError);
+            // Continue to load relationships anyway
+          }
+          
           // Load existing relationships
           await loadRelationships(authUser.id);
         } else {
@@ -51,6 +88,7 @@ const CircleSetupScreen = () => {
         }
       } catch (error) {
         console.error('Error loading user data:', error);
+        setError('Failed to load your data. Please try refreshing the page.');
       } finally {
         setLoading(false);
       }
@@ -67,10 +105,17 @@ const CircleSetupScreen = () => {
         .eq('user_id', userId)
         .order('created_at', { ascending: true });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error loading relationships from table relationships_7fb42a5e9d:', error);
+        throw error;
+      }
+
+      // Set the people array and mark data as fetched
       setPeople(data || []);
+      setDataFetched(true);
     } catch (error) {
       console.error('Error loading relationships:', error);
+      setError('We\'re having trouble loading your Circle. Please refresh or try again later.');
     }
   };
 
@@ -97,40 +142,43 @@ const CircleSetupScreen = () => {
         return;
       }
 
-      // Create preview
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setCurrentPerson(prev => ({
-          ...prev,
-          photoFile: file,
-          photoPreview: e.target.result
-        }));
-      };
-      reader.readAsDataURL(file);
+      setCurrentPerson(prev => ({
+        ...prev,
+        photoFile: file,
+        photoPreview: URL.createObjectURL(file)
+      }));
     }
   };
 
   const uploadPhotoToStorage = async (file) => {
     if (!file || !user) return null;
+    
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${user.id}/${Date.now()}.${fileExt}`;
+      
+      const { error } = await supabase.storage
+        .from('circle-photos')
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: true
+        });
 
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${user.id}/${Date.now()}.${fileExt}`;
+      if (error) {
+        console.error('Error uploading image to circle-photos storage:', error);
+        return null;
+      }
 
-    const { error } = await supabase.storage
-      .from('circle-photos')
-      .upload(fileName, file, { cacheControl: '3600', upsert: true });
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('circle-photos')
+        .getPublicUrl(fileName);
 
-    if (error) {
-      console.error('Error uploading image:', error);
+      return publicUrl;
+    } catch (error) {
+      console.error('Storage error for circle-photos:', error);
       return null;
     }
-
-    // Get public URL
-    const { data: { publicUrl } } = supabase.storage
-      .from('circle-photos')
-      .getPublicUrl(fileName);
-
-    return publicUrl;
   };
 
   const resetForm = () => {
@@ -148,26 +196,33 @@ const CircleSetupScreen = () => {
 
   const handleAddPerson = async (e) => {
     e.preventDefault();
-
+    
     if (!currentPerson.name.trim()) {
       alert('Please enter a name');
       return;
     }
-
+    
     if (!currentPerson.relationship_type) {
       alert('Please select a relationship type');
       return;
     }
-
-    setLoading(true);
+    
+    setSaving(true);
+    setError(null);
+    
     try {
       let photoUrl = currentPerson.photo_url;
-
+      
       // Upload photo if there's a new one
       if (currentPerson.photoFile) {
         photoUrl = await uploadPhotoToStorage(currentPerson.photoFile);
+        
+        // If upload fails, show a friendly message but continue
+        if (!photoUrl) {
+          setError('Image upload didn\'t complete. Your person will be saved without an image.');
+        }
       }
-
+      
       if (isEditing && editingId) {
         // Update existing person
         const { error } = await supabase
@@ -181,8 +236,11 @@ const CircleSetupScreen = () => {
           })
           .eq('id', editingId);
 
-        if (error) throw error;
-
+        if (error) {
+          console.error('Error updating relationship record:', error);
+          throw error;
+        }
+        
         // Track circle update - edit
         trackCircleUpdated({
           actionType: 'edit',
@@ -203,8 +261,11 @@ const CircleSetupScreen = () => {
           }])
           .select();
 
-        if (error) throw error;
-
+        if (error) {
+          console.error('Error inserting new relationship record:', error);
+          throw error;
+        }
+        
         // Track circle update - add
         trackCircleUpdated({
           actionType: 'add',
@@ -213,15 +274,15 @@ const CircleSetupScreen = () => {
           relationship_id: data?.[0]?.id
         });
       }
-
+      
       // Reload relationships
       await loadRelationships(user.id);
       resetForm();
     } catch (error) {
       console.error('Error saving person:', error);
-      alert('Failed to save. Please try again.');
+      setError('Failed to save this person. Please try again.');
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
@@ -242,19 +303,24 @@ const CircleSetupScreen = () => {
     if (!window.confirm('Are you sure you want to remove this person from your circle?')) {
       return;
     }
-
+    
     setLoading(true);
+    setError(null);
+    
     try {
       const { error } = await supabase
         .from('relationships_7fb42a5e9d')
         .delete()
         .eq('id', personId);
 
-      if (error) throw error;
-
+      if (error) {
+        console.error('Error deleting relationship record:', error);
+        throw error;
+      }
+      
       // Update the local state
       setPeople(people.filter(person => person.id !== personId));
-
+      
       // Track circle update - remove
       trackCircleUpdated({
         actionType: 'remove',
@@ -263,7 +329,7 @@ const CircleSetupScreen = () => {
       });
     } catch (error) {
       console.error('Error deleting person:', error);
-      alert('Failed to remove person. Please try again.');
+      setError('Failed to remove person. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -275,22 +341,23 @@ const CircleSetupScreen = () => {
         return;
       }
     }
-
+    
     setSaving(true);
+    
     try {
       // In the future, we might want to save additional data or preferences
-
+      
       // Track circle save event
       trackCircleUpdated({
         actionType: 'save_and_continue',
         size: people.length
       });
-
-      // For now, we just navigate to the next screen
-      navigate('/dashboard'); // Update this to your next screen path
+      
+      // Navigate to the next screen
+      navigate('/dashboard');
     } catch (error) {
       console.error('Error saving:', error);
-      alert('Failed to save. Please try again.');
+      setError('Failed to save. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -303,9 +370,18 @@ const CircleSetupScreen = () => {
       size: people.length
     });
     
-    navigate('/dashboard'); // Update this to your next screen path
+    navigate('/dashboard');
   };
 
+  const handleRetry = () => {
+    if (user) {
+      setError(null);
+      setLoading(true);
+      loadRelationships(user.id);
+    }
+  };
+
+  // Initial loading state
   if (loading && !user) {
     return (
       <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-b from-blue-50 to-blue-100">
@@ -315,13 +391,13 @@ const CircleSetupScreen = () => {
   }
 
   return (
-    <motion.div
+    <motion.div 
       className="min-h-screen w-full flex flex-col items-center justify-center px-4 py-8 bg-gradient-to-b from-purple-50 to-pink-50"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.6 }}
     >
-      <motion.div
+      <motion.div 
         className="w-full max-w-2xl bg-white p-6 md:p-8 rounded-2xl shadow-lg"
         initial={{ y: 20 }}
         animate={{ y: 0 }}
@@ -329,7 +405,7 @@ const CircleSetupScreen = () => {
       >
         <div className="flex justify-between items-center mb-6">
           <div>
-            <motion.h1
+            <motion.h1 
               className="text-2xl font-bold text-purple-800 mb-2"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -337,7 +413,7 @@ const CircleSetupScreen = () => {
             >
               Your Circle of Support
             </motion.h1>
-            <motion.p
+            <motion.p 
               className="text-sm text-purple-700"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -356,8 +432,30 @@ const CircleSetupScreen = () => {
           </motion.button>
         </div>
 
+        {/* Error message */}
+        {error && (
+          <motion.div 
+            className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <SafeIcon icon={FiAlertCircle} className="mr-2 text-red-500 flex-shrink-0" />
+                <p className="text-red-700 text-sm">{error}</p>
+              </div>
+              <button 
+                onClick={handleRetry}
+                className="text-red-600 hover:text-red-800 p-1 rounded-full"
+              >
+                <SafeIcon icon={FiRefreshCw} className="w-4 h-4" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+
         {/* Form to add/edit person */}
-        <motion.form
+        <motion.form 
           onSubmit={handleAddPerson}
           className="mb-8 p-5 border border-purple-100 rounded-xl bg-purple-50"
           initial={{ opacity: 0 }}
@@ -367,7 +465,7 @@ const CircleSetupScreen = () => {
           <h3 className="text-lg font-medium text-purple-700 mb-4">
             {isEditing ? 'Edit Person' : 'Add Person to Your Circle'}
           </h3>
-
+          
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div>
               <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
@@ -389,7 +487,7 @@ const CircleSetupScreen = () => {
                 />
               </div>
             </div>
-
+            
             <div>
               <label htmlFor="relationship_type" className="block text-sm font-medium text-gray-700 mb-1">
                 Relationship *
@@ -411,7 +509,7 @@ const CircleSetupScreen = () => {
               </select>
             </div>
           </div>
-
+          
           <div className="mb-4">
             <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-1">
               Notes (optional)
@@ -426,7 +524,7 @@ const CircleSetupScreen = () => {
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-purple-500 focus:border-purple-500 resize-none"
             />
           </div>
-
+          
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Photo (optional)
@@ -440,7 +538,12 @@ const CircleSetupScreen = () => {
                 />
                 <button
                   type="button"
-                  onClick={() => setCurrentPerson(prev => ({ ...prev, photoFile: null, photoPreview: null, photo_url: null }))}
+                  onClick={() => setCurrentPerson(prev => ({
+                    ...prev,
+                    photoFile: null,
+                    photoPreview: null,
+                    photo_url: null
+                  }))}
                   className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full"
                 >
                   <SafeIcon icon={FiX} className="w-3 h-3" />
@@ -465,23 +568,23 @@ const CircleSetupScreen = () => {
               </div>
             )}
           </div>
-
+          
           <div className="flex gap-2">
             <motion.button
               type="submit"
               className="py-2 px-4 bg-purple-600 text-white rounded-lg font-medium shadow-md hover:bg-purple-700 transition-all flex items-center"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              disabled={loading}
+              disabled={saving}
             >
-              {loading ? (
+              {saving ? (
                 <SafeIcon icon={FiLoader} className="animate-spin mr-2" />
               ) : (
                 <SafeIcon icon={isEditing ? FiCheck : FiPlus} className="mr-2" />
               )}
               {isEditing ? 'Save Changes' : 'Add to Circle'}
             </motion.button>
-
+            
             {isEditing && (
               <motion.button
                 type="button"
@@ -495,7 +598,7 @@ const CircleSetupScreen = () => {
             )}
           </div>
         </motion.form>
-
+        
         {/* List of people in circle */}
         <motion.div
           className="mb-8"
@@ -513,11 +616,17 @@ const CircleSetupScreen = () => {
               </p>
             )}
           </div>
-
-          {people.length === 0 ? (
+          
+          {/* Conditional rendering based on loading state, error state, and data */}
+          {loading && !dataFetched ? (
+            <div className="text-center py-6">
+              <SafeIcon icon={FiLoader} className="w-8 h-8 text-purple-600 animate-spin mx-auto mb-2" />
+              <p className="text-purple-600">Loading your circle...</p>
+            </div>
+          ) : dataFetched && people.length === 0 ? (
             <div className="text-center py-6 bg-gray-50 rounded-lg border border-gray-100">
               <p className="text-gray-500">
-                No one added to your circle yet.
+                You haven't added anyone to your circle yet.
               </p>
             </div>
           ) : (
@@ -538,6 +647,11 @@ const CircleSetupScreen = () => {
                           src={person.photo_url}
                           alt={person.name}
                           className="w-full h-full object-cover rounded-full border-2 border-purple-200"
+                          onError={(e) => {
+                            // Fallback for broken images
+                            e.target.onerror = null;
+                            e.target.parentNode.innerHTML = `<div class="w-full h-full rounded-full bg-purple-100 flex items-center justify-center"><svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" class="text-purple-500" height="1em" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></div>`;
+                          }}
                         />
                       ) : (
                         <div className="w-full h-full rounded-full bg-purple-100 flex items-center justify-center">
@@ -584,7 +698,7 @@ const CircleSetupScreen = () => {
             </div>
           )}
         </motion.div>
-
+        
         {/* Action buttons */}
         <motion.div
           className="flex flex-col gap-3"
@@ -611,7 +725,7 @@ const CircleSetupScreen = () => {
               </>
             )}
           </motion.button>
-
+          
           <motion.button
             onClick={handleSkip}
             disabled={saving}
@@ -645,16 +759,21 @@ const CircleSetupScreen = () => {
             >
               <SafeIcon icon={FiX} className="w-6 h-6" />
             </button>
+            
             <h2 className="text-xl font-semibold text-purple-800 mb-4">About Your Circle</h2>
+            
             <p className="text-gray-700 mb-4">
               People we love often fade into the background—not because we don't care, but because ADHD makes new things louder than important things.
             </p>
+            
             <p className="text-gray-700 mb-4">
               Your Circle helps bring these people forward again, protecting you from isolation and helping you be more consistent in your relationships.
             </p>
+            
             <p className="text-gray-700 mb-4">
               We recommend adding at least 3 people who matter most to you. You can always edit or update your circle later.
             </p>
+            
             <div className="flex justify-center">
               <motion.button
                 className="py-2 px-6 bg-purple-600 text-white rounded-full font-medium shadow-md hover:bg-purple-700 transition-all"

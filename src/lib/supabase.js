@@ -7,6 +7,8 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
+    detectSessionInUrl: true, // Enable detecting auth parameters in URL
+    flowType: 'pkce', // Use PKCE flow for added security
   }
 });
 

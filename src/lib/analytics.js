@@ -1,4 +1,4 @@
-/**
+/** 
  * Analytics Service - Silent event logging for product analytics
  * 
  * This module handles tracking key user interactions and app events
@@ -28,30 +28,23 @@ export const logEvent = async (eventName, metadata = {}, mirrorToWebhook = true)
     // Special handling for session_start to prevent duplicates
     if (eventName === 'session_start' && sessionTracked) return;
     if (eventName === 'session_start') sessionTracked = true;
-    
+
     // Get the current user
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return; // Skip logging if no authenticated user
-
+    
     // Log to database
     await supabase
       .from('event_logs_analytics_admin')
       .insert([
-        {
-          user_id: user.id,
-          event_name: eventName,
-          metadata
-        }
+        { user_id: user.id, event_name: eventName, metadata }
       ]);
 
     // Optionally mirror to webhook
     if (mirrorToWebhook) {
-      sendWebhook('analytics', eventName, {
-        user_id: user.id,
-        ...metadata
-      });
+      sendWebhook('analytics', eventName, { user_id: user.id, ...metadata });
     }
-
+    
     // Optional development logging
     if (import.meta.env.DEV) {
       console.log(`[Analytics] Event logged: ${eventName}`, metadata);
@@ -69,7 +62,7 @@ export const logEvent = async (eventName, metadata = {}, mirrorToWebhook = true)
  * Convenience method to track when a user starts a new session
  */
 export const trackSessionStart = () => {
-  logEvent('session_start', { 
+  logEvent('session_start', {
     timestamp: new Date().toISOString(),
     referrer: document.referrer || null,
     userAgent: navigator.userAgent
@@ -144,6 +137,19 @@ export const trackFeedbackOpened = (data = {}) => {
   logEvent('feedback_opened', data);
 };
 
+/**
+ * Track when a user creates a new spark
+ * 
+ * @param {object} sparkData - Data about the spark
+ */
+export const trackSparkCreated = (sparkData = {}) => {
+  logEvent('spark_created', {
+    content_length: sparkData.content_length || 0,
+    type: sparkData.type || 'unknown',
+    ...sparkData
+  });
+};
+
 export default {
   logEvent,
   trackSessionStart,
@@ -152,5 +158,6 @@ export default {
   trackCheckInRoundComplete,
   trackEchoGenerated,
   trackCircleUpdated,
-  trackFeedbackOpened
+  trackFeedbackOpened,
+  trackSparkCreated
 };

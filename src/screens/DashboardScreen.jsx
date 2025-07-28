@@ -5,7 +5,7 @@ import supabase from '../lib/supabase';
 import SafeIcon from '../common/SafeIcon';
 import EchoesFeed from '../components/EchoesFeed';
 import FeedbackButton from '../components/FeedbackButton';
-import { FiUser, FiUsers, FiMessageCircle, FiLoader, FiArrowRight, FiEdit3, FiStar, FiAlertCircle } from 'react-icons/fi';
+import { FiUser, FiUsers, FiMessageCircle, FiLoader, FiArrowRight, FiEdit3, FiStar, FiAlertCircle, FiPlus } from 'react-icons/fi';
 
 const DashboardScreen = () => {
   const navigate = useNavigate();
@@ -25,6 +25,7 @@ const DashboardScreen = () => {
           navigate('/');
           return;
         }
+        
         setUser(authUser);
 
         // Load user profile
@@ -64,13 +65,8 @@ const DashboardScreen = () => {
         const connectedPeopleIds = [...new Set(checkInsData?.map(c => c.relationship_id) || [])];
         const recentlyConnected = connectedPeopleIds.length;
 
-        setCircleStats({
-          total: totalPeople,
-          connected: recentlyConnected
-        });
-
+        setCircleStats({ total: totalPeople, connected: recentlyConnected });
         setRecentCheckIns(checkInsData || []);
-
       } catch (error) {
         console.error('Error loading dashboard data:', error);
       } finally {
@@ -82,7 +78,20 @@ const DashboardScreen = () => {
   }, [navigate]);
 
   const handleDailyPing = () => {
-    navigate('/daily-ping');
+    if (circleStats.total === 0) {
+      // If no circle, guide them to set it up
+      navigate('/circle-intro');
+    } else {
+      navigate('/daily-ping');
+    }
+  };
+
+  const handleSetupDream = () => {
+    navigate('/dream-setup');
+  };
+
+  const handleSetupCircle = () => {
+    navigate('/circle-intro');
   };
 
   if (loading) {
@@ -104,7 +113,10 @@ const DashboardScreen = () => {
         {/* Header with user info */}
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold text-blue-800">
-            {userProfile?.display_name ? `Hi, ${userProfile.display_name.split(' ')[0]}` : 'Dashboard'}
+            {userProfile?.display_name ? 
+              `Hi, ${userProfile.display_name.split(' ')[0]}` : 
+              'Dashboard'
+            }
           </h1>
           <motion.button
             onClick={() => navigate('/profile')}
@@ -115,6 +127,37 @@ const DashboardScreen = () => {
             <SafeIcon icon={FiUser} className="text-blue-600" />
           </motion.button>
         </div>
+
+        {/* Dream setup prompt if not completed */}
+        {!userProfile?.dream_text && !userProfile?.dream_image_url && (
+          <motion.div
+            className="bg-gradient-to-r from-purple-100 to-blue-100 rounded-lg shadow-md border border-purple-200 p-5 mb-6"
+            initial={{ y: 20 }}
+            animate={{ y: 0 }}
+            transition={{ delay: 0.1, duration: 0.5 }}
+          >
+            <div className="flex items-start mb-3">
+              <div className="bg-purple-500 p-2 rounded-full mr-3">
+                <SafeIcon icon={FiStar} className="text-white" />
+              </div>
+              <div>
+                <h2 className="text-lg font-medium text-purple-800 mb-1">Set Your Dream</h2>
+                <p className="text-purple-700 text-sm mb-3">
+                  Start by visualizing what you want to achieve. This becomes your North Star.
+                </p>
+              </div>
+            </div>
+            <motion.button
+              onClick={handleSetupDream}
+              className="w-full py-3 px-4 bg-purple-600 text-white rounded-lg font-medium shadow-md hover:bg-purple-700 transition-all flex items-center justify-center"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <SafeIcon icon={FiPlus} className="mr-2" />
+              Create Your Dream
+            </motion.button>
+          </motion.div>
+        )}
 
         {/* Daily connection prompt */}
         <motion.div
@@ -130,9 +173,13 @@ const DashboardScreen = () => {
             </div>
           </div>
           <p className="text-gray-600 mb-4 text-sm">
-            {circleStats.connected === 0
-              ? "You haven't connected with anyone in your circle recently."
-              : `You've connected with ${circleStats.connected} people in your circle recently.`}
+            {circleStats.total === 0 ? (
+              "You haven't added anyone to your circle yet. Let's start building your support network."
+            ) : circleStats.connected === 0 ? (
+              "You haven't connected with anyone in your circle recently."
+            ) : (
+              `You've connected with ${circleStats.connected} people in your circle recently.`
+            )}
           </p>
           <motion.button
             onClick={handleDailyPing}
@@ -140,8 +187,8 @@ const DashboardScreen = () => {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
-            <SafeIcon icon={FiMessageCircle} className="mr-2" />
-            Connect with Your Circle
+            <SafeIcon icon={circleStats.total === 0 ? FiPlus : FiMessageCircle} className="mr-2" />
+            {circleStats.total === 0 ? 'Set Up Your Circle' : 'Connect with Your Circle'}
           </motion.button>
         </motion.div>
 
@@ -188,9 +235,10 @@ const DashboardScreen = () => {
             <h2 className="text-lg font-medium text-green-800">Your Circle</h2>
           </div>
           <p className="text-gray-600 mb-4 text-sm">
-            {circleStats.total === 0
-              ? "You haven't added anyone to your circle yet."
-              : `You have ${circleStats.total} people in your circle.`}
+            {circleStats.total === 0 ? 
+              "Add the people who matter most to stay connected even when life gets chaotic." :
+              `You have ${circleStats.total} people in your circle.`
+            }
           </p>
           <motion.button
             onClick={() => navigate('/circle-setup')}
@@ -198,8 +246,8 @@ const DashboardScreen = () => {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
-            <SafeIcon icon={FiUsers} className="mr-2" />
-            Manage Your Circle
+            <SafeIcon icon={circleStats.total === 0 ? FiPlus : FiUsers} className="mr-2" />
+            {circleStats.total === 0 ? 'Set Up Your Circle' : 'Manage Your Circle'}
           </motion.button>
         </motion.div>
 

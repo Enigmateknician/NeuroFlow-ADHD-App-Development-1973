@@ -1,10 +1,10 @@
-# Testing Instructions for NeuroFlow MVP
+# Testing Instructions for Sparqio MVP
 
 ## Admin Access Testing
 
 To test the admin dashboard with the seed data:
 
-1. **Sign in as admin user**: `admin@neuroflow.app`
+1. **Sign in as admin user**: `admin@sparqio.app`
 2. **Navigate to**: `/#/admin-dashboard`
 3. **Expected results**:
    - Total Dreams: 4
@@ -27,7 +27,7 @@ To test the admin dashboard with the seed data:
 
 **Dashboard Testing:**
 - Login as any user to see personalized dashboard
-- Check circle connection stats
+- Check circle connection stats  
 - View recent echoes
 - Navigate between screens
 
@@ -48,7 +48,7 @@ To test the admin dashboard with the seed data:
 
 The seed data includes:
 - **6 users** with varying completion levels
-- **16 relationships** across different types
+- **16 relationships** across different types  
 - **12 check-ins** with recent timestamps
 - **10 echoes** showing the self-trust building feature
 - **25+ analytics events** for comprehensive admin dashboard testing

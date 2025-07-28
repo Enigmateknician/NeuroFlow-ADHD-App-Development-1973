@@ -2,6 +2,7 @@
  * Echo Generator - Creates meaningful self-reflection messages based on user actions
  * This helps users build self-trust by highlighting their positive behaviors
  */
+
 import { trackEchoGenerated } from './analytics';
 
 /**
@@ -20,9 +21,9 @@ const generateEchoText = (source, data = {}) => {
       name ? `You reached out to ${name} today. That counts.` : 'You maintained a connection today. That matters.',
       name ? `You made time for ${name}. That's relationship building.` : 'You prioritized a relationship today.',
       type === 'pinged' ? 'You initiated connection. That takes courage.' : 'You held someone in your thoughts. That\'s care.',
-      relationship_type === 'family' ? 'You invested in family. That builds roots.' : 
-      relationship_type === 'friend' ? 'You nurtured a friendship. That creates support.' : 
-      relationship_type === 'partner' ? 'You strengthened your partnership. That\'s love in action.' : 
+      relationship_type === 'family' ? 'You invested in family. That builds roots.' :
+      relationship_type === 'friend' ? 'You nurtured a friendship. That creates support.' :
+      relationship_type === 'partner' ? 'You strengthened your partnership. That\'s love in action.' :
       'You showed up for your relationship. That builds trust.'
     ],
 
@@ -68,8 +69,13 @@ export const createEcho = async (supabase, userId, source, data = {}) => {
       .single();
 
     // If there's an error or echoes are disabled, don't create an echo
-    if (userError || userData?.echoes_enabled === false) {
-      return { error: userError || new Error('Echoes disabled for user') };
+    if (userError) {
+      console.error('Error checking echo settings:', userError);
+      return { error: userError };
+    }
+    
+    if (userData?.echoes_enabled === false) {
+      return { error: new Error('Echoes disabled for user') };
     }
 
     // Generate the echo text
@@ -93,12 +99,17 @@ export const createEcho = async (supabase, userId, source, data = {}) => {
     if (error) throw error;
 
     // Track the echo generation for analytics
-    trackEchoGenerated({
-      source,
-      relationship_id: data.relationship_id,
-      relationship_type: data.relationship_type,
-      echo_text: text
-    });
+    try {
+      trackEchoGenerated({
+        source,
+        relationship_id: data.relationship_id,
+        relationship_type: data.relationship_type,
+        echo_text: text
+      });
+    } catch (analyticsError) {
+      console.error('Error tracking echo generation:', analyticsError);
+      // Don't fail echo creation if analytics fails
+    }
 
     return { data: echo };
   } catch (error) {

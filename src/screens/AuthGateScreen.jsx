@@ -15,29 +15,27 @@ const AuthGateScreen = () => {
   useEffect(() => {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      
       if (session) {
         // User is already logged in, ensure they exist in users table
         await ensureUserExists(session.user);
         navigate('/welcome');
       }
-      
       setCheckingSession(false);
     };
-
+    
     checkSession();
   }, [navigate]);
 
   const ensureUserExists = async (user) => {
     if (!user) return;
-
+    
     // Check if user exists in users table
     const { data, error } = await supabase
       .from('users')
       .select('id')
       .eq('id', user.id)
       .single();
-
+    
     // If user doesn't exist, create a new record
     if (error || !data) {
       await supabase
@@ -57,24 +55,35 @@ const AuthGateScreen = () => {
     setMessage({ text: '', type: '' });
 
     try {
+      // Get the base URL to use for redirects
+      // For Netlify, we need to use the deployed URL
+      // We'll use window.location.origin as the base, but can customize for specific domains
+      let redirectTo;
+      const currentURL = window.location.origin;
+      
+      // Check if we're on a known domain and use it accordingly
+      if (currentURL.includes('netlify.app')) {
+        redirectTo = 'https://enchanting-toffee-e50d7e.netlify.app';
+      } else if (currentURL.includes('sparqio.io')) {
+        redirectTo = 'https://www.sparqio.io';
+      } else {
+        redirectTo = currentURL; // Default to current origin (works for localhost)
+      }
+      
+      console.log("Using redirect URL:", redirectTo);
+      
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
-          emailRedirectTo: window.location.origin + '/#/welcome',
+          // Always add the hash for proper routing after auth
+          emailRedirectTo: `${redirectTo}/#/welcome`
         }
       });
 
       if (error) throw error;
-      
-      setMessage({
-        text: 'Check your email for the login link!',
-        type: 'success'
-      });
+      setMessage({ text: 'Check your email for the login link!', type: 'success' });
     } catch (error) {
-      setMessage({
-        text: error.message || 'An error occurred during login',
-        type: 'error'
-      });
+      setMessage({ text: error.message || 'An error occurred during login', type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -85,19 +94,28 @@ const AuthGateScreen = () => {
     setMessage({ text: '', type: '' });
 
     try {
+      // Similar redirect handling as above
+      let redirectTo;
+      const currentURL = window.location.origin;
+      
+      if (currentURL.includes('netlify.app')) {
+        redirectTo = 'https://enchanting-toffee-e50d7e.netlify.app';
+      } else if (currentURL.includes('sparqio.io')) {
+        redirectTo = 'https://www.sparqio.io';
+      } else {
+        redirectTo = currentURL;
+      }
+      
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: window.location.origin + '/#/welcome',
+          redirectTo: `${redirectTo}/#/welcome`
         }
       });
 
       if (error) throw error;
     } catch (error) {
-      setMessage({
-        text: error.message || 'An error occurred during login',
-        type: 'error'
-      });
+      setMessage({ text: error.message || 'An error occurred during login', type: 'error' });
       setLoading(false);
     }
   };
@@ -111,28 +129,28 @@ const AuthGateScreen = () => {
   }
 
   return (
-    <motion.div 
+    <motion.div
       className="min-h-screen w-full flex flex-col items-center justify-center px-6 py-12 bg-gradient-to-b from-blue-50 to-blue-100"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.6 }}
     >
-      <motion.div 
+      <motion.div
         className="w-full max-w-md bg-white p-8 rounded-2xl shadow-lg"
         initial={{ y: 20 }}
         animate={{ y: 0 }}
         transition={{ delay: 0.2, duration: 0.5 }}
       >
-        <motion.h1 
+        <motion.h1
           className="text-2xl font-bold text-blue-800 mb-4 text-center"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.4, duration: 0.5 }}
         >
-          Welcome to NeuroFlow
+          Welcome to Sparqio
         </motion.h1>
         
-        <motion.p 
+        <motion.p
           className="text-md text-blue-700 mb-6 text-center"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -140,20 +158,15 @@ const AuthGateScreen = () => {
         >
           Sign in to begin your personalized focus journey.
         </motion.p>
-
+        
         {message.text && (
-          <motion.div 
-            className={`p-3 rounded-lg mb-4 ${
-              message.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
-            }`}
+          <motion.div
+            className={`p-3 rounded-lg mb-4 ${message.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
           >
             <div className="flex items-center">
-              <SafeIcon 
-                icon={message.type === 'error' ? FiAlertCircle : FiMail} 
-                className="mr-2 flex-shrink-0"
-              />
+              <SafeIcon icon={message.type === 'error' ? FiAlertCircle : FiMail} className="mr-2 flex-shrink-0" />
               <p>{message.text}</p>
             </div>
           </motion.div>
@@ -207,9 +220,9 @@ const AuthGateScreen = () => {
           whileTap={{ scale: 0.98 }}
           disabled={loading}
         >
-          <img 
-            src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" 
-            alt="Google" 
+          <img
+            src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+            alt="Google"
             className="w-5 h-5 mr-2"
           />
           Sign in with Google
